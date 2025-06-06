@@ -144,13 +144,43 @@ def parse_payment_slip(text: str) -> Dict[str, Any]:
             if parsed_data["bank"]:
                 break
         
+        # รองรับสลิปกรุงไทย
+        ktb_pattern = (
+            r'(?:นาย|นาง|น\.ส\.|ด\.ช\.|ด\.ญ\.)\s*([^\n]+)\s*\n'
+            r'(?:กรุงไทย|krungthai)\s*\n'
+            r'xxx-x-[x\d]+-\d\s*\n'
+            r'รหัสร้านค้า\s*\n'
+            r'(\d+)\s*\n'
+            r'(?:รหัสธุรกรรม|เลขที่อ้างอิง)\s*\n'
+            r'[a-zA-Z0-9]+\s*\n'
+            r'จำนวนเงิน\s*\n'
+            r'(\d+(?:\.\d{2})?)\s*บาท'
+        )
+        match = re.search(ktb_pattern, text, re.IGNORECASE | re.MULTILINE)
+        if match:
+            sender_name = match.group(1).strip()
+            parsed_data["sender"] = sender_name
+            parsed_data["amount"] = match.group(3)
+            store_id = match.group(2)
+            return parsed_data
+
+        # รองรับสลิปกสิกรไทย - แก้ไขใหม่
+        kbank_pattern = r'นาย\s+([^\n]+)\s*\nธ\.กสิกรไทย[\s\S]*?นาง\s+([^\n]+)\s*\nธ\.กสิกรไทย'
+        match = re.search(kbank_pattern, text)
+        if match:
+            parsed_data["sender"] = f"นาย {match.group(1)}".strip()  # เพิ่ม "นาย" ในผู้โอน
+            parsed_data["recipient"] = f"นาง {match.group(2)}".strip()
+            return parsed_data
+
         # แยกผู้โอน - ปรับปรุงให้จับได้ดีขึ้น
         sender_patterns = [
-            r'จาก\s*\n\s*นาย\s+([^\n]+)',
-            r'จาก\s*\n\s*นาง\s+([^\n]+)', 
+            r'จาก\s*\n\s*(นาย\s+[^\n]+)',  # แก้ไขให้เก็บคำนำหน้า "นาย" ด้วย
+            r'จาก\s*\n\s*(นาง\s+[^\n]+)', 
+            r'จาก\s*\n\s*(นางสาว\s+[^\n]+)',
             r'จาก\s*\n\s*([^\n]+?)(?=\s*xxx|\s*x-|\n|$)',
-            r'นาย\s+([^\n]+?)(?=\s*xxx|\s*x-|\n|$)',
-            r'นาง\s+([^\n]+?)(?=\s*xxx|\s*x-|\n|$)',
+            r'(นาย\s+[^\n]+?)(?=\s*xxx|\s*x-|\n|$)',  # แก้ไขให้เก็บคำนำหน้า "นาย" ด้วย
+            r'(นาง\s+[^\n]+?)(?=\s*xxx|\s*x-|\n|$)',
+            r'(นางสาว\s+[^\n]+?)(?=\s*xxx|\s*x-|\n|$)',
             r'ผู้โอน[:\s]*([^\n]+)',
             r'from[:\s]*([^\n]+)'
         ]
@@ -163,9 +193,9 @@ def parse_payment_slip(text: str) -> Dict[str, Any]:
                 sender = re.sub(r'\s*xxx.*', '', sender).strip()
                 sender = re.sub(r'\s*x-.*', '', sender).strip()
                 if sender and len(sender) > 1:  # ตรวจสอบว่าไม่ใช่ข้อความว่าง
-                    parsed_data["sender"] = sender
+                    parsed_data["sender"] = sender  # ไม่ต้องเพิ่ม f"นาย {sender}" แล้ว
                     break
-        
+
         # แยกผู้รับ - ปรับปรุงให้จับได้ดีขึ้น
         recipient_patterns = [
             r'ไปยัง\s*\n\s*บจก\.\s*\n\s*([^\n]+?)(?=\s*x-|\n|$)',
@@ -173,7 +203,9 @@ def parse_payment_slip(text: str) -> Dict[str, Any]:
             r'บจก\.\s*\n\s*([^\n]+?)(?=\s*x-|\n|$)',
             r'บจก\.\s*([^\n]+?)(?=\s*x-|\n|$)',
             r'ผู้รับ[:\s]*([^\n]+)',
-            r'to[:\s]*([^\n]+)'
+            r'to[:\s]*([^\n]+)',
+            r'นาย\s+([^\n]+?)(?=\s*xxx|\s*x-|\n|$)',
+            r'นาง\s+([^\n]+?)(?=\s*xxx|\s*x-|\n|$)',
         ]
         
         for pattern in recipient_patterns:
